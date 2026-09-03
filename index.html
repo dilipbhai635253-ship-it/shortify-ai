@@ -360,36 +360,378 @@ videoInput.addEventListener("change", function() {
 });
 
 
-function analyzeVideo() {
+// ===== SHORTIFY STEP 5 - REAL CLIP GENERATOR =====
 
-  const button = document.getElementById("analyzeBtn");
-  const results = document.getElementById("results");
+let ffmpeg = null;
+let ffmpegLoaded = false;
+let selectedVideoFile = null;
+let clipURLs = [];
 
-  button.innerHTML = "⏳ AI Analyzing Video...";
-  button.disabled = true;
+async function loadFFmpeg() {
+    if (ffmpegLoaded) return;
 
-  setTimeout(function() {
+    const status = document.createElement("div");
+    status.id = "ffmpegStatus";
+    status.style.cssText =
+        "margin:15px 0;padding:15px;border-radius:12px;background:#151a2b;color:#fff;text-align:center;";
+    status.innerHTML = "⏳ Loading video engine... Please wait (~31 MB)";
+    document.body.appendChild(status);
 
-    button.innerHTML = "✅ Analysis Complete";
+    try {
+        const { FFmpeg } = await import(
+            "https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js"
+        );
 
-    results.style.display = "block";
+        const { fetchFile, toBlobURL } = await import(
+            "https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/esm/index.js"
+        );
 
-  }, 3000);
+        ffmpeg = new FFmpeg();
+
+        const baseURL =
+            "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd";
+
+        await ffmpeg.load({
+            coreURL: await toBlobURL(
+                `${baseURL}/ffmpeg-core.js`,
+                "text/javascript"
+            ),
+            wasmURL: await toBlobURL(
+                `${baseURL}/ffmpeg-core.wasm`,
+                "application/wasm"
+            )
+        });
+
+        window.shortifyFetchFile = fetchFile;
+
+        ffmpegLoaded = true;
+
+        status.innerHTML = "✅ Video engine ready!";
+        setTimeout(() => status.remove(), 2500);
+
+    } catch (error) {
+        console.error(error);
+        status.innerHTML =
+            "❌ Video engine load failed. Internet connection check करें.";
+    }
 }
 
 
+// जब video select हो
+const originalVideoInput = document.getElementById("videoInput");
+
+if (originalVideoInput) {
+
+    originalVideoInput.addEventListener("change", function () {
+
+        if (this.files && this.files.length > 0) {
+            selectedVideoFile = this.files[0];
+
+            // FFmpeg engine background में load करना शुरू
+            loadFFmpeg();
+        }
+
+    });
+
+}
+
+
+// REAL CLIP GENERATION
+async function createRealClip(startTime, duration, clipNumber) {
+
+    if (!selectedVideoFile) {
+        alert("⚠️ पहले video upload करें.");
+        return null;
+    }
+
+    if (!ffmpegLoaded) {
+        await loadFFmpeg();
+    }
+
+    try {
+
+        const extension =
+            selectedVideoFile.name.split(".").pop() || "mp4";
+
+        const inputName = `shortify_input.${extension}`;
+        const outputName = `shortify_clip_${clipNumber}.mp4`;
+
+        const fetchFile = window.shortifyFetchFile;
+
+        // Video FFmpeg memory में डालें
+        await ffmpeg.writeFile(
+            inputName,
+            await fetchFile(selectedVideoFile)
+        );
+
+        // Actual clip बनाएं
+        await ffmpeg.exec([
+            "-ss",
+            String(startTime),
+            "-i",
+            inputName,
+            "-t",
+            String(duration),
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-c:a",
+            "aac",
+            "-movflags",
+            "+faststart",
+            outputName
+        ]);
+
+        const data = await ffmpeg.readFile(outputName);
+
+        const blob = new Blob(
+            [data.buffer],
+            { type: "video/mp4" }
+        );
+
+        return URL.createObjectURL(blob);
+
+    } catch (error) {
+
+        console.error("Clip error:", error);
+
+        alert(
+            "❌ Clip बनाने में समस्या हुई.\n" +
+            "कृपया छोटा video लेकर फिर try करें."
+        );
+
+        return null;
+    }
+}
+
+
+// ANALYZE BUTTON
+async function analyzeVideo() {
+
+    const button =
+        document.querySelector('button[onclick="analyzeVideo()"]');
+
+    const results =
+        document.getElementById("results");
+
+    if (!selectedVideoFile) {
+        alert("⚠️ पहले Long Video upload करें.");
+        return;
+    }
+
+    if (button) {
+        button.innerHTML = "⏳ Creating Real Clips...";
+        button.disabled = true;
+    }
+
+    if (results) {
+        results.style.display = "block";
+
+        results.innerHTML = `
+            <h2>🎬 Creating Your Shorts</h2>
+            <p id="clipStatus">
+                ⏳ Preparing video engine...
+            </p>
+        `;
+    }
+
+    try {
+
+        await loadFFmpeg();
+
+        if (results) {
+            document.getElementById("clipStatus").innerHTML =
+                "⚙️ Generating Clip 01...";
+        }
+
+        // Video की length
+        const video =
+            document.getElementById("videoPreview");
+
+        let totalDuration =
+            video && video.duration
+                ? video.duration
+                : 30;
+
+        // तीन अलग-अलग हिस्से
+        const clipDuration = Math.min(8, totalDuration);
+
+        const start1 = 0;
+
+        const start2 =
+            Math.max(
+                0,
+                Math.floor(totalDuration / 2) - 4
+            );
+
+        const start3 =
+            Math.max(
+                0,
+                Math.floor(totalDuration - clipDuration)
+            );
+
+
+        // Clip 01
+        const clip1 =
+            await createRealClip(
+                start1,
+                clipDuration,
+                1
+            );
+
+        if (results) {
+            document.getElementById("clipStatus").innerHTML =
+                "⚙️ Generating Clip 02...";
+        }
+
+        // Clip 02
+        const clip2 =
+            await createRealClip(
+                start2,
+                clipDuration,
+                2
+            );
+
+        if (results) {
+            document.getElementById("clipStatus").innerHTML =
+                "⚙️ Generating Clip 03...";
+        }
+
+        // Clip 03
+        const clip3 =
+            await createRealClip(
+                start3,
+                clipDuration,
+                3
+            );
+
+        clipURLs = [clip1, clip2, clip3];
+
+        // RESULTS
+        if (results) {
+
+            results.innerHTML = `
+                <h2>🔥 Best Clips Found</h2>
+
+                <div class="clipCard">
+                    <h3>🔥 Best Clip 01</h3>
+                    <p>🎬 Real generated video</p>
+
+                    ${
+                        clip1
+                        ? `<video src="${clip1}" controls
+                            style="width:100%;max-width:500px;border-radius:15px;">
+                           </video>
+                           <br><br>
+                           <a href="${clip1}"
+                              download="Shortify_Clip_01.mp4"
+                              style="display:inline-block;padding:12px 20px;background:#6c63ff;color:white;border-radius:10px;text-decoration:none;">
+                              ⬇️ Download Clip 01
+                           </a>`
+                        : "❌ Clip failed"
+                    }
+                </div>
+
+                <div class="clipCard">
+                    <h3>🔥 Best Clip 02</h3>
+                    <p>🎬 Real generated video</p>
+
+                    ${
+                        clip2
+                        ? `<video src="${clip2}" controls
+                            style="width:100%;max-width:500px;border-radius:15px;">
+                           </video>
+                           <br><br>
+                           <a href="${clip2}"
+                              download="Shortify_Clip_02.mp4"
+                              style="display:inline-block;padding:12px 20px;background:#6c63ff;color:white;border-radius:10px;text-decoration:none;">
+                              ⬇️ Download Clip 02
+                           </a>`
+                        : "❌ Clip failed"
+                    }
+                </div>
+
+                <div class="clipCard">
+                    <h3>🔥 Best Clip 03</h3>
+                    <p>🎬 Real generated video</p>
+
+                    ${
+                        clip3
+                        ? `<video src="${clip3}" controls
+                            style="width:100%;max-width:500px;border-radius:15px;">
+                           </video>
+                           <br><br>
+                           <a href="${clip3}"
+                              download="Shortify_Clip_03.mp4"
+                              style="display:inline-block;padding:12px 20px;background:#6c63ff;color:white;border-radius:10px;text-decoration:none;">
+                              ⬇️ Download Clip 03
+                           </a>`
+                        : "❌ Clip failed"
+                    }
+                </div>
+            `;
+        }
+
+        if (button) {
+            button.innerHTML = "✅ Real Clips Ready";
+        }
+
+    } catch (error) {
+
+        console.error(error);
+
+        if (button) {
+            button.innerHTML = "🔄 Try Again";
+            button.disabled = false;
+        }
+
+        alert(
+            "❌ Video processing failed.\n\n" +
+            "Internet चालू रखें और फिर Try Again करें."
+        );
+    }
+}
+
+
+// पुराने preview/download functions की जगह
 function previewClip(number) {
 
-  alert("▶️ Preview Clip " + number);
-
+    if (clipURLs[number - 1]) {
+        const win = window.open();
+        win.document.write(`
+            <title>Shortify Clip ${number}</title>
+            <video src="${clipURLs[number - 1]}"
+                   controls autoplay
+                   style="width:100%;max-width:700px;">
+            </video>
+        `);
+    } else {
+        alert("⚠️ पहले Analyze Video करें.");
+    }
 }
 
 
 function downloadClip(number) {
 
-  alert("⬇️ Clip " + number + " will be downloaded.");
+    if (!clipURLs[number - 1]) {
+        alert("⚠️ पहले Analyze Video करें.");
+        return;
+    }
 
-}
+    const link = document.createElement("a");
+
+    link.href = clipURLs[number - 1];
+
+    link.download =
+        `Shortify_Clip_${number}.mp4`;
+
+    document.body.appendChild(link);
+
+    link.click();
+
+    link.remove();
+  }
 
 </script>
 </body>
